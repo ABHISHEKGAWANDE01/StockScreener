@@ -9,13 +9,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from analysis.screener import run_screener
-from config import DEFAULT_TIMEFRAME, DEFAULT_UNIVERSE, TIMEFRAMES
+from config import DEFAULT_STYLE, DEFAULT_UNIVERSE, STYLES
 from utils import setup_logging
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="NSE buy screener: breakouts and pullback zones on daily, weekly, or monthly."
+        description="NSE buy screener: Intraday (15m, F&O CE if listed) or Swing (daily, with hold-until)."
     )
     parser.add_argument(
         "--universe",
@@ -23,10 +23,10 @@ def main() -> None:
         choices=["nifty50", "nifty200", "nifty500"],
     )
     parser.add_argument(
-        "--timeframe",
-        default=DEFAULT_TIMEFRAME,
-        choices=list(TIMEFRAMES.keys()),
-        help="Chart timeframe used for breakout and buy-zone scoring.",
+        "--style",
+        default=DEFAULT_STYLE,
+        choices=list(STYLES.keys()),
+        help="intraday or swing",
     )
     parser.add_argument("--min-score", type=float, default=55.0)
     parser.add_argument("--force-download", action="store_true")
@@ -43,10 +43,10 @@ def main() -> None:
         args.force_download,
         ai_verify=args.ai_verify,
         ai_limit=args.ai_limit,
-        timeframe=args.timeframe,
+        style=args.style,
     )
     if df.empty:
-        print("No stocks passed the filters. Try another timeframe or lower --min-score.")
+        print("No stocks passed the filters. Try the other style or lower --min-score.")
         return
 
     out = Path(args.out)
@@ -56,21 +56,21 @@ def main() -> None:
         c
         for c in [
             "symbol",
-            "timeframe",
+            "style",
             "signal",
+            "instrument",
+            "option_contract",
+            "hold_until",
             "entry",
             "sl",
             "target",
             "target_2",
             "setup",
             "score",
-            "breakout_score",
-            "buy_zone_score",
             "ai_score",
             "combined_score",
             "ai_verdict",
             "rr",
-            "pullback_pct",
             "close",
         ]
         if c in df.columns

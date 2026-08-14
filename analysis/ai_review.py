@@ -11,26 +11,28 @@ from config import AI_MODEL_WEIGHT, AI_REVIEW_WORKERS, AI_TECHNICAL_WEIGHT
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a disciplined NSE swing trader.
-The candidate was scored on a chosen analysis timeframe (daily, weekly, or monthly).
-Each name is tagged breakout, buy_zone (pullback in an uptrend), or both.
-You receive quantitative metrics, a rules-based score, OHLC on the selected timeframe, and daily bars when provided.
+SYSTEM_PROMPT = """You are a disciplined NSE trader reviewing a rules-based shortlist.
+Style is either intraday (15-minute chart, square off same day) or swing (daily chart, hold days to weeks).
+Each name is tagged breakout, buy_zone, or both.
+Intraday names may include an NSE F&O call suggestion; if missing, the plan is spot/cash.
 
-Score 0-100 for long quality on THAT timeframe (asymmetric reward vs nearby support):
-- 80-100: trend intact, coiling under the lookback high or sitting on the fast/slow MAs after a clean dip, R:R >= 2, RS positive
-- 65-79: valid swing, one or two blemishes
+Score 0-100 for long quality on THAT style:
+- 80-100: trend intact, clean location, R:R usable, RS positive
+- 65-79: valid trade, one or two blemishes
 - 50-64: mixed; watchlist only
-- below 50: reject — falling knife, exhausted RSI, poor R:R, or broken trend vs the slow MA
+- below 50: reject — falling knife, exhausted RSI, poor R:R, or broken trend
 
-Be skeptical of already-extended rips, sloppy ranges, RSI > 75, underperformance vs Nifty, closes below the slow MA, R:R under 1.5 for buy-zone names.
+Be skeptical of already-extended rips, sloppy ranges, RSI > 75, underperformance vs Nifty, closes below the slow MA.
+For intraday, reject if the move already looks late in the session or if option liquidity would be poor vs spot.
+For swing, comment on whether the hold-until date matches the structure.
 
 Return JSON only with keys:
 ai_score (number 0-100),
 verdict (one of confirm, watch, reject),
 confidence (number 0-100),
-rationale (2-4 sentences focused on reward vs risk on this timeframe),
+rationale (2-4 sentences on reward vs risk for this style),
 risks (array of short strings).
-The technical plan already includes entry, sl, target, target_2 — comment if those levels look wrong, but do not invent a new trade unless the structure is broken.
+The technical plan already includes entry, sl, target, target_2, hold_until, and optional option_contract — comment if those look wrong, but do not invent a new trade unless structure is broken.
 """
 
 
@@ -52,7 +54,13 @@ def _payload(result: BreakoutResult) -> dict:
         "symbol": result.symbol,
         "name": result.name,
         "industry": result.industry,
+        "style": result.style or result.timeframe,
         "timeframe": result.timeframe,
+        "setup": result.setup,
+        "instrument": result.instrument,
+        "option_contract": result.option_contract,
+        "hold_until": result.hold_until,
+        "validity_note": result.validity_note,
         "setup": result.setup,
         "technical_score": result.score,
         "breakout_score": result.breakout_score,
@@ -75,7 +83,7 @@ def review_one(result: BreakoutResult, model: str) -> BreakoutResult:
             {
                 "role": "user",
                 "content": (
-                    "Verify this NSE swing candidate on the stated timeframe (breakout and/or buy zone). "
+                    "Verify this NSE candidate for the stated style (intraday or swing). "
                     "Use only the data given.\n\n"
                     + json.dumps(_payload(result), ensure_ascii=False)
                 ),

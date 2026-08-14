@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from datetime import time as dtime
+
 from analysis.indicators import adx, atr, bollinger_bandwidth, donchian_high, ema, linear_slope, macd, rsi, sma
 from config import (
     BUY_ZONE_WEIGHTS,
@@ -12,11 +14,12 @@ from config import (
     MIN_AVG_DAILY_VALUE_CR,
     MIN_PRICE,
     MIN_RR,
+    NSE_SQUARE_OFF,
     RSI_MAX,
     RSI_MIN,
-    TimeframeSpec,
+    StyleSpec,
     WEIGHTS,
-    get_timeframe,
+    get_style,
 )
 
 
@@ -31,6 +34,7 @@ class BreakoutResult:
     reject_reason: str = ""
     setup: str = ""
     timeframe: str = ""
+    style: str = ""
     breakout_score: float = 0.0
     buy_zone_score: float = 0.0
     metrics: dict = field(default_factory=dict)
@@ -50,6 +54,16 @@ class BreakoutResult:
     target: float | None = None
     target_2: float | None = None
     entry_type: str = ""
+    instrument: str = "spot"
+    option_contract: str = ""
+    option_strike: float | None = None
+    option_expiry: str = ""
+    option_premium: float | None = None
+    option_sl: float | None = None
+    option_target: float | None = None
+    lot_size: int | None = None
+    hold_until: str = ""
+    validity_note: str = ""
 
 
 def _clip01(x: float) -> float:
@@ -58,7 +72,7 @@ def _clip01(x: float) -> float:
     return float(np.clip(x, 0.0, 1.0))
 
 
-def _proximity_score(dist_pct: float, tf: TimeframeSpec) -> float:
+def _proximity_score(dist_pct: float, tf: StyleSpec) -> float:
     if np.isnan(dist_pct):
         return 0.0
     if dist_pct > tf.max_dist_high_pct or dist_pct < tf.min_dist_high_pct:
@@ -151,7 +165,9 @@ def _ohlc_tail(df: pd.DataFrame, n: int, date_fmt: str) -> list[dict]:
 
 
 def _fail(symbol, name, industry, px, reason, timeframe: str = "") -> BreakoutResult:
-    return BreakoutResult(symbol, name, industry, False, 0, px, reason, timeframe=timeframe)
+    return BreakoutResult(
+        symbol, name, industry, False, 0, px, reason, timeframe=timeframe, style=timeframe
+    )
 
 
 def _r2(x: float) -> float:
@@ -169,10 +185,18 @@ def build_trade_plan(
     swing_low: float,
     sma_slow: float,
     atr_val: float,
+    style: StyleSpec | None = None,
 ) -> dict:
     """Entry, stop, and two targets. BUY = take now; BUY STOP = wait for the break; WATCH = levels only."""
+    t1_r = style.t1_r if style else 1.6
+    t2_r = style.t2_r if style else 2.5
+    min_atr = style.min_atr_mult if style else 0.7
+    max_atr = style.max_atr_mult if style else 2.8
+    floor_pct = 0.003 if style and style.key == "intraday" else 0.008
+    cap_pct = 0.025 if style and style.key == "intraday" else 0.08
+
     if np.isnan(atr_val) or atr_val <= 0:
-        atr_val = px * 0.02
+        atr_val = px * (0.004 if style and style.key == "intraday" else 0.02)
 
     in_zone = "buy_zone" in setup
     already_broke = px >= high_s * 0.998
@@ -192,8 +216,8 @@ def build_trade_plan(
 
     struct_sl = min(swing_low, sma_slow if not np.isnan(sma_slow) else swing_low) - 0.3 * atr_val
     sl = struct_sl
-    min_gap = max(0.7 * atr_val, entry * 0.008)
-    max_gap = max(2.8 * atr_val, entry * 0.08)
+    min_gap = max(min_atr * atr_val, entry * floor_pct)
+    max_gap = max(max_atr * atr_val, entry * cap_pct)
     if entry - sl < min_gap:
         sl = entry - min_gap
     if entry - sl > max_gap:
@@ -202,20 +226,20 @@ def build_trade_plan(
         sl = entry - min_gap
 
     risk = entry - sl
-    t1 = entry + 1.6 * risk
+    t1 = entry + t1_r * risk
     if recent_high > entry * 1.006:
         t1 = max(t1, recent_high)
     if already_broke or signal == "BUY STOP":
-        stretch = high_l if high_l > entry else entry + 2.2 * risk
-        t1 = max(t1, min(stretch, entry + 2.0 * risk))
-    t1 = max(t1, entry + 1.2 * risk)
+        stretch = high_l if high_l > entry else entry + (t1_r + 0.6) * risk
+        t1 = max(t1, min(stretch, entry + max(t1_r, 1.2) * risk))
+    t1 = max(t1, entry + 1.1 * risk)
 
-    t2 = max(t1 + 0.8 * risk, entry + 2.5 * risk)
+    t2 = max(t1 + 0.6 * risk, entry + t2_r * risk)
     if high_l > t1:
         t2 = max(t2, high_l)
 
     rr = (t1 - entry) / risk if risk > 0 else 0.0
-    if rr < 1.15 or score < 52:
+    if rr < 1.05 or score < 52:
         signal = "WATCH"
 
     return {
@@ -229,6 +253,81 @@ def build_trade_plan(
         "reward_pct": round((t1 - entry) / entry * 100, 2),
         "risk_pct": round((entry - sl) / entry * 100, 2),
     }
+
+
+def compute_validity(style: StyleSpec, setup: str) -> dict:
+    now = pd.Timestamp.now(tz="Asia/Kolkata")
+    if style.key == "intraday":
+        valid = now.normalize() + pd.Timedelta(hours=15, minutes=15)
+        past_cut = now.time() >= dtime(15, 15)
+        if past_cut:
+            note = (
+                f"Intraday idea is for the cash session. Square off by {NSE_SQUARE_OFF}. "
+                "If the session has already passed 15:15 IST, treat this as the next session's plan."
+            )
+        else:
+            note = (
+                f"Valid only for today's session. Square off by {NSE_SQUARE_OFF}. "
+                "Cancel an unfilled BUY STOP at 15:15. Do not carry overnight."
+            )
+        stamp = valid.strftime("%Y-%m-%d 15:15")
+        return {
+            "hold_until": stamp,
+            "valid_until_label": f"today {NSE_SQUARE_OFF}",
+            "validity_note": note,
+        }
+
+    days = style.hold_business_days
+    if "buy_zone" in setup and "breakout" not in setup:
+        days = max(days, 20)
+    elif setup == "breakout":
+        days = min(max(days, 8), 12)
+    naive = now.tz_convert("Asia/Kolkata").tz_localize(None) if now.tzinfo else now
+    hold = naive.normalize() + pd.offsets.BDay(days)
+    label = hold.strftime("%d %b %Y")
+    return {
+        "hold_until": hold.strftime("%Y-%m-%d"),
+        "valid_until_label": label,
+        "validity_note": (
+            f"Swing validity until {label} (~{days} trading days). "
+            "Exit at T1/T2 or SL if they hit first. Do not hold past this date without a fresh scan."
+        ),
+    }
+
+
+def apply_vehicle(result: "BreakoutResult", vehicle: dict) -> "BreakoutResult":
+    result.instrument = vehicle.get("instrument") or "spot"
+    result.option_contract = vehicle.get("contract") or ""
+    result.option_strike = vehicle.get("strike")
+    result.option_expiry = vehicle.get("expiry") or ""
+    result.option_premium = vehicle.get("premium")
+    result.lot_size = vehicle.get("lot_size")
+    result.metrics["instrument"] = result.instrument
+    result.metrics["option_contract"] = result.option_contract
+    result.metrics["option_strike"] = result.option_strike
+    result.metrics["option_expiry"] = result.option_expiry
+    result.metrics["option_premium"] = result.option_premium
+    result.metrics["lot_size"] = result.lot_size
+    result.metrics["vehicle_note"] = vehicle.get("note") or ""
+
+    if result.instrument == "option" and result.option_premium and result.entry and result.sl:
+        delta = 0.5
+        prem = float(result.option_premium)
+        opt_sl = prem - delta * (result.entry - result.sl)
+        opt_t1 = prem + delta * ((result.target or result.entry) - result.entry)
+        result.option_sl = _r2(max(opt_sl, prem * 0.35))
+        result.option_target = _r2(max(opt_t1, prem * 1.35))
+        result.metrics["option_sl"] = result.option_sl
+        result.metrics["option_target"] = result.option_target
+        result.reasons.insert(
+            0,
+            f"Options: BUY {result.option_contract} @ ~₹{prem:.2f} | option SL ₹{result.option_sl:.2f} | "
+            f"option T1 ₹{result.option_target:.2f}"
+            + (f" | lot {result.lot_size}" if result.lot_size else ""),
+        )
+    elif result.instrument == "spot":
+        result.reasons.append(vehicle.get("note") or "Spot/cash trade (no F&O).")
+    return result
 
 
 def apply_ai_to_signal(result: BreakoutResult) -> BreakoutResult:
@@ -247,10 +346,10 @@ def analyze_symbol(
     daily: pd.DataFrame,
     bars: pd.DataFrame,
     nifty_bars: pd.DataFrame | None,
-    tf: TimeframeSpec | str = "monthly",
+    tf: StyleSpec | str = "swing",
 ) -> BreakoutResult:
     if isinstance(tf, str):
-        tf = get_timeframe(tf)
+        tf = get_style(tf)
     if len(bars) < tf.min_bars or len(daily) < 60:
         return _fail(symbol, name, industry, 0, "insufficient price history", tf.key)
 
@@ -295,7 +394,7 @@ def analyze_symbol(
     ema_fast = float(last["ema_fast"])
     sma_fast = float(last["sma_fast"])
     sma_slow = float(last["sma_slow"])
-    fast_ma = ema_fast if tf.key in {"daily", "weekly"} else sma_fast
+    fast_ma = ema_fast if tf.use_ema else sma_fast
     above_fast = px > fast_ma
     stacked = (not np.isnan(sma_slow)) and fast_ma > sma_slow and px > fast_ma
     above_slow = (not np.isnan(sma_slow)) and px > sma_slow
@@ -492,7 +591,9 @@ def analyze_symbol(
         swing_low=swing_low,
         sma_slow=sma_slow,
         atr_val=atr_val,
+        style=tf,
     )
+    validity = compute_validity(tf, setup)
     if plan["signal"] == "BUY":
         reasons.insert(0, f"Signal BUY around ₹{plan['entry']:.2f} | SL ₹{plan['sl']:.2f} | T1 ₹{plan['target']:.2f} | T2 ₹{plan['target_2']:.2f}")
     elif plan["signal"] == "BUY STOP":
@@ -502,10 +603,12 @@ def analyze_symbol(
         )
     else:
         reasons.insert(0, f"Signal WATCH — planned SL ₹{plan['sl']:.2f} / T1 ₹{plan['target']:.2f} (R:R {plan['rr']:.1f})")
+    reasons.append(validity["validity_note"])
 
     bars_tail = _ohlc_tail(m, tf.tail_bars, tf.date_fmt)
     metrics = {
         "timeframe": tf.key,
+        "style": tf.key,
         "close": round(px, 2),
         "setup": setup,
         "signal": plan["signal"],
@@ -540,6 +643,10 @@ def analyze_symbol(
         "close_in_range": round(close_in_range, 2),
         "high_label": tf.high_label,
         "hold_hint": tf.hold_hint,
+        "hold_until": validity["hold_until"],
+        "valid_until_label": validity["valid_until_label"],
+        "validity_note": validity["validity_note"],
+        "instrument": "spot",
     }
 
     return BreakoutResult(
@@ -551,12 +658,13 @@ def analyze_symbol(
         close=px,
         setup=setup,
         timeframe=tf.key,
+        style=tf.key,
         breakout_score=round(breakout_score, 1),
         buy_zone_score=round(buy_zone_score, 1),
         metrics=metrics,
         reasons=reasons,
         monthly_tail=bars_tail,
-        daily_tail=bars_tail if tf.key == "daily" else _ohlc_tail(daily, 30, "%Y-%m-%d"),
+        daily_tail=bars_tail if tf.interval == "1d" else _ohlc_tail(daily.tail(40), 30, "%Y-%m-%d"),
         bars_tail=bars_tail,
         signal=plan["signal"],
         entry=plan["entry"],
@@ -564,4 +672,7 @@ def analyze_symbol(
         target=plan["target"],
         target_2=plan["target_2"],
         entry_type=plan["entry_type"],
+        instrument="spot",
+        hold_until=validity["hold_until"],
+        validity_note=validity["validity_note"],
     )
