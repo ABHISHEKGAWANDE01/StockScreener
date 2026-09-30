@@ -429,7 +429,9 @@ def analyze_symbol(
     rs_val = float("nan")
     rs_slope = float("nan")
     if nifty_bars is not None and len(nifty_bars) >= tf.rs_lookback + 1:
-        aligned = pd.concat({"stock": close, "nifty": nifty_bars["Close"]}, axis=1).dropna()
+        aligned = pd.concat(
+            {"stock": close, "nifty": nifty_bars["Close"]}, axis=1, sort=True
+        ).dropna()
         if len(aligned) >= tf.rs_lookback + 1:
             stock_ret = aligned["stock"].iloc[-1] / aligned["stock"].iloc[-1 - tf.rs_lookback] - 1
             nifty_ret = aligned["nifty"].iloc[-1] / aligned["nifty"].iloc[-1 - tf.rs_lookback] - 1

@@ -1,0 +1,79 @@
+[theme]
+base = "dark"
+primaryColor = "#E11D48"
+backgroundColor = "#07010F"
+secondaryBackgroundColor = "#160824"
+textColor = "#F8FAFC"
+linkColor = "#FDA4AF"
+borderColor = "#FB7185"
+codeBackgroundColor = "#1A0B2E"
+codeTextColor = "#F8FAFC"
+dataframeBorderColor = "#FB7185"
+dataframeHeaderBackgroundColor = "#1A0B2E"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "12px"
+buttonRadius = "999px"
+baseFontSize = 15
+baseFontWeight = 400
+headingFontSizes = ["2rem", "1.45rem", "1.2rem", "1.05rem", "0.95rem", "0.85rem"]
+headingFontWeights = [800, 700, 700, 600, 600, 500]
+linkUnderline = false
+font = "Syne:https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
+greenColor = "#86EFAC"
+redColor = "#FB7185"
+orangeColor = "#FCD34D"
+blueColor = "#FDA4AF"
+violetColor = "#FB7185"
+grayColor = "#E2E8F0"
+chartCategoricalColors = ["#E11D48", "#FB7185", "#FDA4AF", "#F8FAFC", "#86EFAC", "#FCD34D", "#F472B6"]
+
+[theme.sidebar]
+backgroundColor = "#0A0214"
+secondaryBackgroundColor = "#160824"
+textColor = "#F8FAFC"
+borderColor = "#FB7185"
+primaryColor = "#E11D48"
+
+[theme.dark]
+primaryColor = "#E11D48"
+backgroundColor = "#07010F"
+secondaryBackgroundColor = "#160824"
+textColor = "#F8FAFC"
+linkColor = "#FDA4AF"
+borderColor = "#FB7185"
+codeBackgroundColor = "#1A0B2E"
+codeTextColor = "#F8FAFC"
+dataframeHeaderBackgroundColor = "#1A0B2E"
+greenColor = "#86EFAC"
+redColor = "#FB7185"
+violetColor = "#FB7185"
+grayColor = "#E2E8F0"
+
+[theme.dark.sidebar]
+backgroundColor = "#0A0214"
+secondaryBackgroundColor = "#160824"
+textColor = "#F8FAFC"
+borderColor = "#FB7185"
+
+[theme.light]
+primaryColor = "#BE123C"
+backgroundColor = "#FFF7F9"
+secondaryBackgroundColor = "#FFE4E6"
+textColor = "#1F1230"
+linkColor = "#BE123C"
+borderColor = "#FB7185"
+codeBackgroundColor = "#FFF1F2"
+codeTextColor = "#1F1230"
+dataframeHeaderBackgroundColor = "#FFE4E6"
+greenColor = "#166534"
+redColor = "#BE123C"
+violetColor = "#BE123C"
+grayColor = "#44403C"
+
+[theme.light.sidebar]
+backgroundColor = "#FFF1F2"
+secondaryBackgroundColor = "#FFE4E6"
+textColor = "#1F1230"
+borderColor = "#FB7185"

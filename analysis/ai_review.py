@@ -45,7 +45,16 @@ def _client() -> Any:
         ) from exc
     key = os.getenv("OPENAI_API_KEY", "").strip()
     if not key:
-        raise RuntimeError("OPENAI_API_KEY is missing. Put it in a .env file in the project root.")
+        try:
+            import streamlit as st
+
+            key = str(st.secrets.get("OPENAI_API_KEY", "")).strip()
+        except Exception:
+            key = ""
+    if not key:
+        raise RuntimeError(
+            "OPENAI_API_KEY is missing. Put it in a .env file or .streamlit/secrets.toml."
+        )
     return OpenAI(api_key=key)
 
 
